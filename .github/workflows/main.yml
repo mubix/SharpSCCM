@@ -17,7 +17,7 @@ jobs:
       env:
         DOTNET_CLI_TELEMETRY_OPTOUT: 1
     - name: Find files
-      run: dir /b /s
+      run: cmd.exe /c dir /b /s
     - name: Create Release
       id: create_release
       uses: "marvinpinto/action-automatic-releases@latest"
