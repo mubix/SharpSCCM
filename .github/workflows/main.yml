@@ -9,7 +9,7 @@ jobs:
 
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@latest
+    - uses: actions/checkout@v3.1.0
     - name: Build
       run: dotnet build --configuration Release
       env:
