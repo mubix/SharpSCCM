@@ -16,8 +16,6 @@ jobs:
       run: dotnet.exe build --configuration Release
       env:
         DOTNET_CLI_TELEMETRY_OPTOUT: 1
-    - name: Find files
-      run: cmd.exe /c dir /b /s
     - name: Create Release
       id: create_release
       uses: "marvinpinto/action-automatic-releases@latest"
@@ -25,5 +23,5 @@ jobs:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "latest"
         title: Release ${{ github.sha }}
-        files: ./SharpSCCM/bin/Release/SharpSCCM.exe
+        files: ./bin/Release/SharpSCCM.exe
         prerelease: false
