@@ -10,6 +10,9 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v2.3.4
+    - uses: NuGet/setup-nuget@v1.1.1
+    - name: NuGet Restore
+      run: nuget restore
     - name: Build
       run: dotnet build --configuration Release --no-restore
       env:
