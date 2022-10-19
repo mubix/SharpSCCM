@@ -17,7 +17,7 @@ jobs:
       env:
         DOTNET_CLI_TELEMETRY_OPTOUT: 1
     - name: Create Release-Merged
-      id: create_release
+      id: create_release-merged
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
@@ -26,7 +26,7 @@ jobs:
         files: ./bin/Release/SharpSCCM_merged.exe
         prerelease: false
     - name: Create Release-Zip
-      id: create_release
+      id: create_release-zip
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
