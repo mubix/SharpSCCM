@@ -16,12 +16,21 @@ jobs:
       run: dotnet.exe build --configuration Release
       env:
         DOTNET_CLI_TELEMETRY_OPTOUT: 1
-    - name: Create Release
+    - name: Create Release-Merged
+      id: create_release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest-merged"
+        title: Release ${{ github.sha }}
+        files: ./bin/Release/SharpSCCM_merged.exe
+        prerelease: false
+    - name: Create Release-Zip
       id: create_release
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "latest"
         title: Release ${{ github.sha }}
-        files: ./bin/Release/SharpSCCM.exe
+        files: ./bin/Release/*
         prerelease: false
