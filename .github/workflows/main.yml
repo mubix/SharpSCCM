@@ -25,12 +25,18 @@ jobs:
         title: Release ${{ github.sha }}
         files: ./bin/Release/SharpSCCM_merged.exe
         prerelease: false
-    - name: Create Release-Zip
+    - name: Create Release Zip File
+      uses: thedoctor0/zip-release@main
+      with:
+        type: 'zip'
+        filename: 'SharpSCCM.zip'
+        path: ./bin/Release/
+    - name: Upload Release Zip
       id: create_release-zip
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "latest"
         title: Release ${{ github.sha }}
-        files: ./bin/Release/*
+        files: SharpSCCM.zip
         prerelease: false
