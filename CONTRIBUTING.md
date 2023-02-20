@@ -51,14 +51,14 @@ The maintainer will respond as soon as possible. Depending on the impact and wor
 ## Development
 
 ### Lab Environment
-Microsoft’s [official lab kits](https://docs.microsoft.com/en-us/microsoft-365/enterprise/modern-desktop-deployment-and-management-lab?view=o365-worldwide) can automatically deploy a fully operational SCCM lab in Hyper-V running ConfigMgr 2103 or 2111. Using them is a great way to get started without taking a lot of time to manually deploy SCCM.
+Microsoft’s [official lab kits](https://docs.microsoft.com/en-us/microsoft-365/enterprise/modern-desktop-deployment-and-management-lab?view=o365-worldwide) can automatically deploy a fully operational SCCM lab in Hyper-V running ConfigMgr. Using them is a great way to get started without taking a lot of time to manually deploy SCCM.
 
 ### GitHub Flow
 SharpSCCM follows [GitHub flow](https://docs.github.com/en/get-started/quickstart/github-flow) to colloborate on development.
 
 You will need to fork the main repository to work on your changes. Simply navigate to our GitHub page and click the "Fork" button at the top. Once you've forked the repository, you can clone your new repository and start making edits.
 
-In git it is best to isolate each topic or feature into a “topic branch”. While individual commits allow you control over how small individual changes are made to the code, branches are a great way to group a set of commits all related to one feature together, or to isolate different efforts when you might be working on multiple topics at the same time. A topic branch should be limited in scope to a single issue.
+It is best to isolate each topic or feature into a “feature branch”. While individual commits allow you control over how small individual changes are made to the code, branches are a great way to group a set of commits all related to one feature together, or to isolate different efforts when you might be working on multiple topics at the same time. A feature branch should be limited in scope to a single issue.
 
 ```
 # Checkout the main branch - you want your new branch to come from main
@@ -73,20 +73,17 @@ git checkout newfeature
 
 ## Pull Requests
 
-When submitting a pull request, please:
-
-* follow all instructions in the [pull request template](https://github.com/Mayyhem/SharpSCCM/PULL_REQUEST_TEMPLATE.md).
-* follow the [style guide](https://github.com/Mayyhem/SharpSCCM/wiki).
+When submitting a pull request, please follow all instructions in the [pull request template](https://github.com/Mayyhem/SharpSCCM/blob/main/PULL_REQUEST_TEMPLATE.md).
 
 While the prerequisites above must be satisfied prior to having your pull request reviewed, the reviewer(s) may ask you to complete additional design work, tests, or other changes before your pull request can be ultimately accepted.
 
-When you are ready to generate a pull request, either for preliminary review, or for consideration of merging into the project you must first push your local topic branch back up to GitHub:
+When you are ready to generate a pull request, either for preliminary review, or for consideration of merging into the project you must first push your local feature branch back up to GitHub:
 
 ```
 git push origin newfeature
 ```
 
-Once you've committed and pushed all of your changes to GitHub, go to the page for your fork on GitHub, select your development branch, and click the pull request button. If you need to make any adjustments to your pull request, just push the updates to your branch. Your pull request will automatically track the changes on your development branch and update.
+Once you've committed and pushed all of your changes to GitHub, go to the page for your fork on GitHub, select your feature branch, and click the pull request button. If you need to make any adjustments to your pull request, just push the updates to your branch. Your pull request will automatically track the changes on your development branch and update.
 
 ### Review Process
 The maintainer looks at pull requests on a regular basis, typically within two weeks. After feedback has been given we expect responses within two weeks. After two weeks we may close the pull request if it isn't showing any activity.
@@ -99,7 +96,7 @@ If a maintainer asks you to "rebase" your PR, they're saying that a lot of code 
 To update your forked repository, follow these steps:
 
 ```
-# Fetch upstream master and merge with your repo's master branch
+# Fetch upstream main and merge with your repo's main branch
 git fetch upstream
 git checkout main	
 git merge upstream/main
@@ -122,12 +119,11 @@ Note that this will overwrite the old branch on the server, so make sure you are
 
 Before submitting a feature request, please:
 
-* Check the current road map under the _Projects_ tab
+* Check the current backlog under the _Projects_ tab
 * Check the _Ideas_ section under the _Discussions_ tab
 
-If your idea is already being tracked on the road map or in the ideas discussion, please feel free to comment on it to add your support. Otherwise, please submit your new idea using the _Ideas_ section of the _Discussion_ tab using the [feature request template](https://github.com/Mayyhem/SharpSCCM/.github/ISSUE_TEMPLATE/feature_request.md). Please refrain from opening an issue to track feature requests while we gather community feedback and interest in the idea.
-
+If your idea is already being tracked on the backlog or in the ideas discussion, please feel free to comment on it to add your support. Otherwise, please submit your new idea using the _Ideas_ section of the _Discussion_ tab using the [feature request template](https://github.com/Mayyhem/SharpSCCM/blob/main/.github/ISSUE_TEMPLATE/feature_request.md).
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our [Code of Conduct](https://github.com/Mayyhem/SharpSCCM/CODE_OF_CONDUCT.md). We expect all contributors to follow the Code of Conduct and to treat fellow humans with respect. Please report unacceptable behavior to Chris at @_Mayyhem on Twitter or @Mayyhem in the [BloodHoundGang Slack](https://bloodhoundhq.slack.com). 
+By participating in this project, you agree to abide by our [Code of Conduct](https://github.com/Mayyhem/SharpSCCM/blob/main/CODE_OF_CONDUCT.md). We expect all contributors to follow the Code of Conduct and to treat fellow humans with respect. Please report unacceptable behavior to Chris at @_Mayyhem on Twitter or @Mayyhem in the [BloodHoundGang Slack](https://bloodhoundhq.slack.com). 

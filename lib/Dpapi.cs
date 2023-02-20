@@ -79,9 +79,6 @@ namespace SharpSCCM
             var alghash = BitConverter.ToInt32(blobBytes, offset);
             offset += 4;
 
-            //Console.WriteLine("    algHash/algCrypt : {0} ({1}) / {2} ({3})", alghash, (Interop.CryptAlg)alghash, algCrypt, (Interop.CryptAlg)algCrypt);
-            //Console.WriteLine("    description      : {0}", description);
-
             var algHashLen = BitConverter.ToInt32(blobBytes, offset);
             offset += 4;
 
@@ -110,98 +107,103 @@ namespace SharpSCCM
 
                         return Crypto.DecryptBlob(dataBytes, finalKeyBytes, algCrypt);
                     }
-                    catch (Exception e)
+                    catch (Exception ex)
                     {
-                        Console.WriteLine("    [X] Error retrieving GUID:SHA1 from cache {0} : {1}", guidString, e.Message);
+                        Console.WriteLine("    [!] Error retrieving GUID:SHA1 from cache {0} : {1}", guidString, ex.Message);
                     }
                 }
             }
-
             return new byte[0]; //temp
-
         }
 
-        public static Dictionary<string, string> TriageSystemMasterKeys(bool show = false)
+        public static Dictionary<string, string> TriageSystemMasterKeys(bool reg)
         {
             // retrieve the DPAPI_SYSTEM key and use it to decrypt any SYSTEM DPAPI masterkeys
-
             var mappings = new Dictionary<string, string>();
-
             if (Helpers.IsHighIntegrity())
             {
                 // get the system and user DPAPI backup keys, showing the machine DPAPI keys
                 //  { machine , user }
+                var keys = LSADump.GetDPAPIKeys(true, reg);
+                string systemFolder = "";
 
-                var keys = LSADump.GetDPAPIKeys(true);
-                Helpers.GetSystem();
-                var systemFolder = $"{Environment.GetEnvironmentVariable("SystemDrive")}\\Windows\\System32\\Microsoft\\Protect\\";
-
-                var systemDirs = Directory.GetDirectories(systemFolder);
-
-                foreach (var directory in systemDirs)
+                if (!Environment.Is64BitProcess)
                 {
-                    var machineFiles = Directory.GetFiles(directory);
-                    var userFiles = new string[0];
-
-                    if (Directory.Exists($"{directory}\\User\\"))
+                    systemFolder = $"{Environment.GetEnvironmentVariable("SystemDrive")}\\Windows\\Sysnative\\Microsoft\\Protect\\";
+                }
+                else
+                {
+                    systemFolder = $"{Environment.GetEnvironmentVariable("SystemDrive")}\\Windows\\System32\\Microsoft\\Protect\\";
+                }
+                
+                if (Directory.Exists(systemFolder))
+                {
+                    try
                     {
-                        userFiles = Directory.GetFiles($"{directory}\\User\\");
+                        string[] systemDirs = Directory.GetDirectories(systemFolder);
+
+                        foreach (var directory in systemDirs)
+                        {
+                            var machineFiles = Directory.GetFiles(directory);
+                            var userFiles = new string[0];
+
+                            if (Directory.Exists($"{directory}\\User\\"))
+                            {
+                                userFiles = Directory.GetFiles($"{directory}\\User\\");
+                            }
+
+                            foreach (var file in machineFiles)
+                            {
+                                if (!Regex.IsMatch(file,
+                                        @".*\\[0-9A-Fa-f]{8}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{12}"))
+                                    continue;
+                                var masteyKeyBytes = File.ReadAllBytes(file);
+                                try
+                                {
+                                    // use the "machine" DPAPI key
+                                    var plaintextMasterkey = Dpapi.DecryptMasterKeyWithSha(masteyKeyBytes, keys[0]);
+                                    mappings.Add(plaintextMasterkey.Key, plaintextMasterkey.Value);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine("[!] Error triaging {0} : {1}", file, ex.Message);
+                                }
+                            }
+
+                            foreach (var file in userFiles)
+                            {
+                                if (!Regex.IsMatch(file,
+                                        @".*\\[0-9A-Fa-f]{8}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{12}"))
+                                    continue;
+                                var masteyKeyBytes = File.ReadAllBytes(file);
+                                try
+                                {
+                                    // use the "user" DPAPI key
+                                    var plaintextMasterKey = Dpapi.DecryptMasterKeyWithSha(masteyKeyBytes, keys[1]);
+                                    mappings.Add(plaintextMasterKey.Key, plaintextMasterKey.Value);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine("[!] Error triaging {0} : {1}", file, ex.Message);
+                                }
+                            }
+                        }
+                        Console.WriteLine("\r\n[+] SYSTEM master key cache:");
+                        foreach (KeyValuePair<string, string> kvp in mappings)
+                        {
+                            Console.WriteLine("    {0}:{1}", kvp.Key, kvp.Value);
+                        }
                     }
-
-                    foreach (var file in machineFiles)
+                    catch (Exception)
                     {
-                        if (!Regex.IsMatch(file, @".*\\[0-9A-Fa-f]{8}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{12}"))
-                            continue;
 
-                        var fileName = Path.GetFileName(file);
-                        if (show)
-                        {
-                            Console.WriteLine("[*] Found SYSTEM system MasterKey : {0}", file);
-                        }
-
-                        var masteyKeyBytes = File.ReadAllBytes(file);
-                        try
-                        {
-                            // use the "machine" DPAPI key
-                            var plaintextMasterkey = Dpapi.DecryptMasterKeyWithSha(masteyKeyBytes, keys[0]);
-                            mappings.Add(plaintextMasterkey.Key, plaintextMasterkey.Value);
-                        }
-                        catch (Exception e)
-                        {
-                            Console.WriteLine("[X] Error triaging {0} : {1}", file, e.Message);
-                        }
-                    }
-
-                    foreach (var file in userFiles)
-                    {
-                        if (!Regex.IsMatch(file, @".*\\[0-9A-Fa-f]{8}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{4}[-][0-9A-Fa-f]{12}"))
-                            continue;
-
-                        var fileName = Path.GetFileName(file);
-                        if (show)
-                        {
-                            Console.WriteLine("[*] Found SYSTEM user MasterKey : {0}", file);
-                        }
-
-                        var masteyKeyBytes = File.ReadAllBytes(file);
-                        try
-                        {
-                            // use the "user" DPAPI key
-                            var plaintextMasterKey = Dpapi.DecryptMasterKeyWithSha(masteyKeyBytes, keys[1]);
-                            mappings.Add(plaintextMasterKey.Key, plaintextMasterKey.Value);
-                        }
-                        catch (Exception e)
-                        {
-                            Console.WriteLine("[X] Error triaging {0} : {1}", file, e.Message);
-                        }
                     }
                 }
             }
             else
             {
-                Console.WriteLine("\r\n[X] Must be elevated to triage SYSTEM masterkeys!\r\n");
+                Console.WriteLine("\r\n[!] Must be elevated to triage SYSTEM masterkeys!\r\n");
             }
-
             return mappings;
         }
 
@@ -397,12 +399,6 @@ namespace SharpSCCM
         //public static void Execute(string blob, string masterkey)
         public static string Execute(string blob, Dictionary<string, string> masterkeys)
         {
-            //Console.WriteLine("\r\n[*] Action: Describe DPAPI blob");
-
-            // 1. Read in the hex dpapi blob
-            // 2. Convert it to bytes
-            // 3. Trim the extra header
-
             byte[] blobBytes = new byte[blob.Length / 2];
             for (int i = 0; i < blob.Length; i += 2)
             {
@@ -413,12 +409,6 @@ namespace SharpSCCM
             var offset = 4;
             byte[] unmangledArray = new byte[blob.Length / 2];
             Buffer.BlockCopy(blobBytes, 4, unmangledArray, 0, blobBytes.Length - offset);
-
-            // Super pro debug printing
-            //foreach(byte b in unmangledArray)
-            //{
-            //    Console.Write("0x" + b.ToString("X2") + " ");
-            //}
 
             // Copy the demangled array back into blobBytes
             blobBytes = unmangledArray;
@@ -446,12 +436,10 @@ namespace SharpSCCM
                             data = Encoding.ASCII.GetString(decBytesRaw);
                             return data;
                         }
-                        //Console.WriteLine("    dec(blob)        : {0}", data);
                     }
                     else
                     {
                         string hexData = BitConverter.ToString(decBytesRaw).Replace("-", " ");
-                        Console.WriteLine("    dec(blob)        : {0}", hexData);
                         return hexData;
                     }
                 }

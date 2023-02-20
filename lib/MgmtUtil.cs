@@ -8,7 +8,7 @@ namespace SharpSCCM
 {
     public class MgmtUtil
     {
-        public static string BuildClassInstanceQueryString(ManagementScope scope, string wmiClass, bool count = false, string[] properties = null, string whereCondition = null, string orderByColumn = null, bool verbose = false)
+        public static string BuildClassInstanceQueryString(ManagementScope wmiConnection, string wmiClass, bool count = false, string[] properties = null, string whereCondition = null, string orderByColumn = null, bool verbose = false)
         {
             string propString;
             if (verbose || count || properties == null)
@@ -17,9 +17,16 @@ namespace SharpSCCM
             }
             else
             {
-                string[] keyPropertyNames = GetKeyPropertyNames(scope, wmiClass);
-                properties = keyPropertyNames.Union(properties).ToArray();
-                propString = string.Join(",", properties);
+                string[] keyPropertyNames = GetKeyPropertyNames(wmiConnection, wmiClass);
+                if (keyPropertyNames.Length > 0)
+                {
+                    properties = keyPropertyNames.Union(properties).ToArray();
+                    propString = string.Join(",", properties);
+                }
+                else
+                {
+                    return null;
+                }
             }
 
             string whereClause = "";
@@ -46,83 +53,71 @@ namespace SharpSCCM
             return query;
         }
 
-        public static ManagementObjectCollection GetClassInstanceCollection(ManagementScope scope, string wmiClass, string query)
+        public static ManagementObjectCollection GetClassInstances(ManagementScope wmiConnection, string wmiClass, string query = null, bool count = false, string[] properties = null, string whereCondition = null, string orderByColumn = null, bool dryRun = false, bool verbose = false, bool getLazyProps = true, bool printOutput = false)
         {
             ManagementObjectCollection classInstances = null;
-            try
+            if (wmiConnection.IsConnected)
             {
-                Console.WriteLine($"[+] Executing WQL query: {query}");
-                ObjectQuery objQuery = new ObjectQuery(query);
-                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, objQuery);
-                classInstances = searcher.Get();
-                
-            }
-            catch (ManagementException error)
-            {
-                Console.WriteLine("An error occurred while querying for WMI data: " + error.Message);
-            }
-            catch(Exception error)
-            {
-                Console.WriteLine($"An unhandled exception of type {error.GetType()} occurred: {error.Message}");
+                // Build query string if not provided
+                query = string.IsNullOrEmpty(query) ? BuildClassInstanceQueryString(wmiConnection, wmiClass, count, properties, whereCondition, orderByColumn, verbose) : query;
+                if (dryRun)
+                {
+                    Console.WriteLine($"[+] WQL query: {query}");
+                }
+                else
+                {
+                    if (printOutput) Console.WriteLine($"[+] Executing WQL query: {query}");
+                    ObjectQuery objQuery = new ObjectQuery(query);
+                    ManagementObjectSearcher searcher = new ManagementObjectSearcher(wmiConnection, objQuery);
+                    try
+                    {
+                        classInstances = searcher.Get();
+                        if (printOutput)
+                        {
+                            if (classInstances.Count > 0)
+                            {
+                                PrintClassInstances(wmiClass, classInstances, count, properties, verbose, getLazyProps);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[+] No instances of {wmiClass} meeting the specified criteria were found, or you do not have permission to query them");
+                            }
+                        }
+                    }
+                    catch (ManagementException ex)
+                    {
+                        Console.WriteLine($"[!] An exception occurred while querying for WMI data: {ex.Message}");
+                        if (ex.Message == "Unexpected error ")
+                        {
+                            Console.WriteLine("[!] Does your account have the correct permissions?");
+                        }
+                    }
+                }
             }
             return classInstances;
         }
 
-        public static void GetClassInstances(ManagementScope scope, string wmiClass, bool count = false, string[] properties = null, string whereCondition = null, string orderByColumn = null, bool dryRun = false, bool verbose = false, bool getLazyProps = true)
-        {
-            string query = BuildClassInstanceQueryString(scope, wmiClass, count, properties, whereCondition, orderByColumn, verbose);
-            if (dryRun)
-            {
-                Console.WriteLine($"[+] WQL query: {query}");
-            }
-            else
-            {
-                ManagementObjectCollection classInstanceCollection = GetClassInstanceCollection(scope, wmiClass, query);
-                PrintClassInstances(scope, wmiClass, query, classInstanceCollection, count, properties, verbose, getLazyProps);
-            }
-        }
-
         public static string[] GetKeyPropertyNames(ManagementScope wmiConnection, string className)
-        {
-            using (ManagementClass managementClass = new ManagementClass(wmiConnection, new ManagementPath(className), new ObjectGetOptions()))
-            {
-                return managementClass.Properties
-                    .Cast<PropertyData>()
-                    .Where(
-                        property => property.Qualifiers
-                            .Cast<QualifierData>()
-                            .Any(qualifier => string.Equals(qualifier.Name, "Key", StringComparison.OrdinalIgnoreCase))
-                    )
-                    .Select(property => property.Name)
-                    .ToArray();
-            }
-        }
-
-        public static void InvokeQuery(ManagementScope scope, string query)
         {
             try
             {
-                ObjectQuery objQuery = new ObjectQuery(query);
-                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, objQuery);
-                Console.WriteLine("-----------------------------------");
-                Console.WriteLine(objQuery);
-                Console.WriteLine("-----------------------------------");
-                foreach (ManagementObject queryObj in searcher.Get())
+                using (ManagementClass managementClass = new ManagementClass(wmiConnection, new ManagementPath(className), new ObjectGetOptions()))
                 {
-                    foreach (PropertyData prop in queryObj.Properties)
-                    {
-                        Console.WriteLine("{0}: {1}", prop.Name, prop.Value);
-                    }
-                    Console.WriteLine("-----------------------------------");
+                    return managementClass.Properties
+                        .Cast<PropertyData>()
+                        .Where(
+                            property => property.Qualifiers
+                                .Cast<QualifierData>()
+                                .Any(qualifier => string.Equals(qualifier.Name, "Key", StringComparison.OrdinalIgnoreCase))
+                        )
+                        .Select(property => property.Name)
+                        .ToArray();
                 }
             }
-            catch (ManagementException error)
+            catch (Exception ex)
             {
-                Console.WriteLine("An error occurred while querying for WMI data: " + error.Message);
-            }
-            catch (Exception error)
-            {
-                Console.WriteLine($"An unhandled exception of type {error.GetType()} occurred: {error.Message}");
+                Console.WriteLine($"[!] An exception occurred getting properties for {className}: {ex.Message}");
+                return new string[0];
             }
         }
 
@@ -130,65 +125,110 @@ namespace SharpSCCM
         {
             string path = "";
             ConnectionOptions connection = new ConnectionOptions();
-            if (server == "localhost")
+            // local connection
+            if (server == "127.0.0.1")
             {
                 if (string.IsNullOrEmpty(wmiNamespace))
                 {
-                    wmiNamespace = "root\\ccm";
+                    wmiNamespace = "root\\CCM";
                 }
                 path = $"\\\\{server}\\{wmiNamespace}";
             }
-            else if (!string.IsNullOrEmpty(server) && !string.IsNullOrEmpty(siteCode))
+            // server is provided
+            else if (!string.IsNullOrEmpty(server))
             {
-                if (string.IsNullOrEmpty(wmiNamespace))
+                // but sidecode is not provided
+                if (string.IsNullOrEmpty(siteCode))
                 {
-                    path = $"\\\\{server}\\root\\SMS\\site_{siteCode}";
+                    (_, siteCode) = ClientWmi.GetCurrentManagementPointAndSiteCode();
+                    // siteCode should now be populated
+                    if (!string.IsNullOrEmpty(siteCode))
+                    {
+                        Console.WriteLine($"[+] Using provided management point: {server}");
+                    }
                 }
-                else
+                // server and sitecode should now be populated unless there are errors querying the local WMI repository
+                if (!string.IsNullOrEmpty(server) && !string.IsNullOrEmpty(siteCode))
                 {
-                    path = $"\\\\{server}\\{wmiNamespace}";
+                    if (string.IsNullOrEmpty(wmiNamespace))
+                    {
+                        path = $"\\\\{server}\\root\\SMS\\site_{siteCode}";
+                    }
+                    else
+                    {
+                        path = $"\\\\{server}\\{wmiNamespace}";
+                    }
                 }
             }
             else
+            // server not provided
             {
-                (server, siteCode) = ClientWmi.GetCurrentManagementPointAndSiteCode();
-                if (string.IsNullOrEmpty(wmiNamespace))
-                {
-                    path = $"\\\\{server}\\root\\SMS\\site_{siteCode}";
+                // but sitecode is provided
+                if (!string.IsNullOrEmpty(siteCode))
+                { 
+                    (server, _) = ClientWmi.GetCurrentManagementPointAndSiteCode();
+                    // server should now be populated
+                    if (!string.IsNullOrEmpty(server))
+                    {
+                        Console.WriteLine($"[+] Using provided site code: {siteCode}");
+                    }
                 }
+                // server and sitecode not provided
                 else
                 {
-                    path = $"\\\\{server}\\{wmiNamespace}";
+                    (server, siteCode) = ClientWmi.GetCurrentManagementPointAndSiteCode();
                 }
-                
+                // server and sitecode should now be populated unless there are errors querying the local WMI repository
+                if (!string.IsNullOrEmpty(server) && !string.IsNullOrEmpty(siteCode))
+                {
+                    if (string.IsNullOrEmpty(wmiNamespace))
+                    {
+                        path = $"\\\\{server}\\root\\SMS\\site_{siteCode}";
+                    }
+                    else
+                    {
+                        path = $"\\\\{server}\\{wmiNamespace}";
+                    }
+                }
             }
-            ManagementScope wmiConnection = new ManagementScope(path, connection);
+            ManagementScope wmiConnection = null;
             try
             {
-                Console.WriteLine($"[+] Connecting to {wmiConnection.Path}");
-                wmiConnection.Connect();
+                if (!string.IsNullOrEmpty(path))
+                {
+                    wmiConnection = new ManagementScope(path, connection);
+                    Console.WriteLine($"[+] Connecting to {wmiConnection.Path}");
+                    wmiConnection.Connect();
+                }
             }
-            catch (UnauthorizedAccessException error)
+            catch (UnauthorizedAccessException ex)
             {
-                Console.WriteLine("[!] Access to WMI was not authorized (user name or password might be incorrect): " + error.Message);
+                Console.WriteLine($"[!] Access to the WMI provider was not authorized: {ex.Message.Trim()}");
             }
-            catch (ManagementException error)
+            catch (ManagementException ex)
             {
-                Console.WriteLine("[!] Access to WMI was not authorized (user name or password might be incorrect): " + error.Message);
+                Console.WriteLine($"[!] Could not connect to {path}: " + ex.Message);
+                if (path == "\\\\127.0.0.1\\root\\CCM" && ex.Message == "Invalid namespace ")
+                {
+                    Console.WriteLine(
+                        "[!] The SCCM client may not be installed on this machine\n" +
+                        "[!] Try specifying a management point (-mp) and site code (-sc)"
+                        );
+                }
             }
-            catch (Exception error)
+            catch (Exception ex)
             {
-                Console.WriteLine($"An unhandled exception of type {error.GetType()} occurred: {error.Message}");
+                Console.WriteLine($"An unhandled exception of type {ex.GetType()} occurred: {ex.Message}");
             }
             return wmiConnection;
         }
 
-        public static void PrintClasses(ManagementScope scope)
+        public static void PrintClasses(ManagementScope wmiConnection)
         {
             string query = "SELECT * FROM meta_class";
             Console.WriteLine($"[+] Executing WQL query: {query}");
             ObjectQuery objQuery = new ObjectQuery(query);
-            ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, objQuery);
+            ManagementObjectSearcher searcher = new ManagementObjectSearcher(wmiConnection, objQuery);
             var classes = new List<string>();
             foreach (ManagementClass wmiClass in searcher.Get())
             {
@@ -200,69 +240,82 @@ namespace SharpSCCM
             //Console.WriteLine(jsonString);
         }
 
-        public static void PrintClassInstances(ManagementScope scope, string wmiClass, string query, ManagementObjectCollection classInstanceCollection, bool count = false, string[] properties = null, bool verbose = false, bool getLazyProps = true)
+        public static void PrintClassInstances(string wmiClass, ManagementObjectCollection classInstances, bool count = false, string[] properties = null, bool verbose = false, bool getLazyProps = true)
         {
-            Console.WriteLine("-----------------------------------");
-            Console.WriteLine(wmiClass);
-            Console.WriteLine("-----------------------------------");
-            foreach (ManagementObject queryObj in classInstanceCollection)
+            if (classInstances != null)
             {
-                // Get lazy properties unless we're just counting instances or we explicitly don't want lazy props
-                if (!count && getLazyProps)
+                if (!string.IsNullOrEmpty(wmiClass))
                 {
-                    try
-                    {
-                        queryObj.Get();
-                    }
-                    catch (Exception error)
-                    {
-                        Console.WriteLine($"An unhandled exception of type {error.GetType().ToString()} occurred: {error.Message}");
-                    }
+                    Console.WriteLine("-----------------------------------");
+                    Console.WriteLine(wmiClass);
                 }
-                foreach (PropertyData prop in queryObj.Properties)
+                Console.WriteLine("-----------------------------------");
+                foreach (ManagementObject queryObj in classInstances)
                 {
-                    // Print default properties if none specified, named properties if specified, or all properties if verbose
-                    if (properties == null || properties.Length == 0 || properties.Contains(prop.Name) || count || verbose)
+                    // Get lazy properties unless we're just counting instances or we explicitly don't want lazy props
+                    if (!count && getLazyProps)
                     {
-                        if (prop.IsArray)
+                        try
                         {
-                            // Test to see if we can display property values as strings, otherwise bail. Byte[] (e.g., Device.ObjectGUID) breaks things, Object[] (e.g., Collection.CollectionRules, Collection.RefreshSchedule) breaks things
-                            if (prop.Value is String[])
+                            queryObj.Get();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"An unhandled exception of type {ex.GetType().ToString()} occurred: {ex.Message}");
+                        }
+                    }
+                    foreach (PropertyData prop in queryObj.Properties)
+                    {
+                        // Print default properties if none specified, named properties if specified, or all properties if verbose
+                        if (properties == null || properties.Length == 0 || properties.Contains(prop.Name) || count || verbose)
+                        {
+                            if (prop.IsArray)
                             {
-                                String[] nestedValues = (String[])(prop.Value);
-                                Console.WriteLine($"{prop.Name}: {string.Join(", ", nestedValues)}");
-                            }
-                            else if (prop.Value is int[])
-                            {
-                                int[] nestedValues = (int[])(prop.Value);
-                                string[] nestedValueStrings = nestedValues.Select(x => x.ToString()).ToArray();
-                                Console.WriteLine($"{prop.Name}: {string.Join(", ", nestedValueStrings)}");
-                            }
-                            else
-                            {
-                                string canConvertToString = prop.Value as string;
-                                if (canConvertToString != null)
+                                // Test to see if we can display property values as strings, otherwise bail. Byte[] (e.g., Device.ObjectGUID) breaks things, Object[] (e.g., Collection.CollectionRules, Collection.RefreshSchedule) breaks things
+                                if (prop.Value is String[])
                                 {
-                                    Console.WriteLine($"{prop.Name}: {canConvertToString}");
+                                    String[] nestedValues = (String[])(prop.Value);
+                                    Console.WriteLine($"{prop.Name}: {string.Join(", ", nestedValues)}");
+                                }
+                                else if (prop.Value is int[])
+                                {
+                                    int[] nestedValues = (int[])(prop.Value);
+                                    string[] nestedValueStrings = nestedValues.Select(x => x.ToString()).ToArray();
+                                    Console.WriteLine($"{prop.Name}: {string.Join(", ", nestedValueStrings)}");
+                                }
+                                else if (prop.Value == null)
+                                {
+                                    Console.WriteLine($"{prop.Name}: Empty");
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"{prop.Name}: Can't display {prop.Type.ToString()} as a String");
+                                    string canConvertToString = prop.Value as string;
+                                    if (canConvertToString != null)
+                                    {
+                                        Console.WriteLine($"{prop.Name}: {canConvertToString}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"{prop.Name}: Can't display {prop.Type.ToString()} as a String");
+                                    }
                                 }
                             }
-                        }
-                        else
-                        {
-                            Console.WriteLine("{0}: {1}", prop.Name, prop.Value);
+                            else
+                            {
+                                Console.WriteLine("{0}: {1}", prop.Name, prop.Value);
+                            }
                         }
                     }
+                    Console.WriteLine("-----------------------------------");
                 }
-                Console.WriteLine("-----------------------------------");
             }
         }
 
         public static void PrintClassProperties(ManagementObject classInstance, bool showValue = false)
         {
+            Console.WriteLine("-----------------------------------");
+            Console.WriteLine(classInstance.ClassPath);
+            Console.WriteLine("-----------------------------------");
             foreach (PropertyData property in classInstance.Properties)
             {
                 if (!showValue)
@@ -274,6 +327,16 @@ namespace SharpSCCM
                     Console.WriteLine($"{property.Name} ({property.Type}): {property.Value}");
                 }
             }
+            Console.WriteLine("-----------------------------------");
+        }
+
+        public static void PrintObjectProperties(ManagementBaseObject managementBaseObject, bool showValue = false)
+        {
+            foreach (PropertyData property in managementBaseObject.Properties)
+            {
+                Console.WriteLine($"{property.Name}: {property.Value}");
+            }
+            Console.WriteLine("-----------------------------------");
         }
     }
 }
