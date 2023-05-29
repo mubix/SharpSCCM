@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO.Ports;
 using System.Linq;
 using System.Management;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -37,15 +38,19 @@ namespace SharpSCCM
             // Command line options
             try
             {
-                Console.WriteLine();
-                Console.WriteLine("  _______ _     _ _______  ______  _____  _______ _______ _______ _______");
-                Console.WriteLine("  |______ |_____| |_____| |_____/ |_____] |______ |       |       |  |  |");
-                Console.WriteLine("  ______| |     | |     | |    \\_ |       ______| |______ |______ |  |  |");
+                if (!args.Contains("--no-banner"))
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("  _______ _     _ _______  ______  _____  _______ _______ _______ _______");
+                    Console.WriteLine($"  |______ |_____| |_____| |_____/ |_____] |______ |       |       |  |  |    v{Assembly.GetEntryAssembly().GetName().Version}");
+                    Console.WriteLine("  ______| |     | |     | |    \\_ |       ______| |______ |______ |  |  |    @_Mayyhem ");
+                }
                 Console.WriteLine();
 
                 // Gather required arguments
                 var rootCommand = new RootCommand("A C# utility for interacting with SCCM (now Microsoft Endpoint Configuration Manager) by Chris Thompson (@_Mayyhem)");
                 rootCommand.AddGlobalOption(new Option<bool>("--debug", "Print debug messages for troubleshooting"));
+                rootCommand.AddGlobalOption(new Option<bool>(new[] { "--no-banner" }, "Do not display banner in command output"));
 
                 //
                 // Subcommands
@@ -382,7 +387,8 @@ namespace SharpSCCM
                             MgmtUtil.GetClassInstances(wmiConnection, "SMS_R_System", null, count, properties, whereCondition, orderBy, dryRun, verbose, printOutput: true);
                         }
                     });
-
+               
+                
                 // get primary-users
                 var getPrimaryUser = new Command("primary-users", "Get information on primary users set for devices from a management point via WMI\n" +
                     "  Permitted security roles:\n" +
@@ -422,24 +428,49 @@ namespace SharpSCCM
                             MgmtUtil.GetClassInstances(wmiConnection, "SMS_UserMachineRelationship", null, count, properties, whereCondition, orderBy, dryRun, verbose, false, true);
                         }
                     });
+                 
+                var getResourceID = new Command("resource-id", "Get the resouceID for a username or device");
+                getCommand.Add(getResourceID);
+                getResourceID.Add(new Option<string>(new[] { "--user", "-u" }, "The UniqueUserName of the user to get a ResourceID for (e.g., --user CORP\\Labadmin)") { Arity = ArgumentArity.ExactlyOne });
+                getResourceID.Add(new Option<string>(new[] { "--device", "-d" }, "The name of the device to get the ResourceID for (e.g., --device WORKSTATION1)") { Arity = ArgumentArity.ExactlyOne });
+                getResourceID.Handler = CommandHandler.Create(
+                    (string managementPoint, string siteCode, string user, string device) =>
+                    {
+                        if (string.IsNullOrEmpty(user) && string.IsNullOrEmpty(device))
+                        {
+                            Console.WriteLine("[!] Please specify a UniqueUserName (-u) or a device Name (-d) to retrieve the ResourceID for");
+                        }
+                        else
+                        {
+                            ManagementScope wmiConnection = MgmtUtil.NewWmiConnection(managementPoint, null, siteCode);
+                            if (wmiConnection != null && wmiConnection.IsConnected)
+                            {
+                                MgmtPointWmi.GetResourceIDForDeviceOrUser(wmiConnection, user, device);
+                            }
+                        }
+                    });
 
                 // get secrets
                 var getSecretsFromPolicy = new Command("secrets", "Request the machine policy from a management point via HTTP to obtain credentials for network access accounts, collection variables, and task sequences\n" +
-                    "  Requirements:\n" +
+                   "  Requirements:\n" +
                     "    - Domain computer account credentials\n" +
                     "        OR\n" +
-                    "    - Local Administrators group membership on a client");
+                    "    - Local Administrators group membership on a client\n" +
+                    "        OR\n" +
+                    "    - PXE certificate and media GUID (use -c and -m)");
                 // get naa alias for backward compatibility
                 getSecretsFromPolicy.AddAlias("naa");
                 getCommand.Add(getSecretsFromPolicy);
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--certificate", "-c" }, "The encoded X509 certificate blob to use that corresponds to a previously registered device"));
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--client-id", "-i" }, "The SMS client GUID to use that corresponds to a previously registered device and certificate"));
+                getSecretsFromPolicy.Add(new Option<string>(new[] { "--media-id", "-m" }, "The media GUID that corresponds to a specific package (e.g. PXE images), which is used decrypt the provided certificate and to sign policy requests"));
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--output-file", "-o" }, "The path where the policy XML will be written to"));
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--password", "-p" }, "The password for the specified computer account"));
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--register-client", "-r" }, "The name of the device to register as a new client (required when user is not a local administrator)"));
                 getSecretsFromPolicy.Add(new Option<string>(new[] { "--username", "-u" }, "The name of the computer account to register the new device record with, including the trailing \"$\""));
+
                 getSecretsFromPolicy.Handler = CommandHandler.Create(
-                    (string managementPoint, string siteCode, string certificate, string clientId, string outputFile, string password, string registerClient, string username) =>
+                    (string managementPoint, string siteCode, string certificate, string clientId, string mediaId, string outputFile, string password, string registerClient, string username) =>
                     {
                         if (managementPoint == null || siteCode == null)
                         {
@@ -447,9 +478,14 @@ namespace SharpSCCM
                         }
                         if (!string.IsNullOrEmpty(managementPoint) && !string.IsNullOrEmpty(siteCode))
                         {
-                            if (!string.IsNullOrEmpty(certificate) && !string.IsNullOrEmpty(clientId))
+                            if (!string.IsNullOrEmpty(certificate) && !string.IsNullOrEmpty(mediaId))
                             {
-                                MgmtPointMessaging.GetSecretsFromPolicy(managementPoint, siteCode, certificate, clientId, null, null, null, outputFile);
+                                string szHTTPProxyAddress = null;
+                                MgmtPointMessaging.SendPolicyAssignmentRequestWithExplicitData(clientId, mediaId, certificate, managementPoint, siteCode, szHTTPProxyAddress);
+                            }
+                            else if (!string.IsNullOrEmpty(certificate) && !string.IsNullOrEmpty(clientId))
+                            {
+                                MgmtPointMessaging.GetSecretsFromPolicies(managementPoint, siteCode, certificate, clientId, null, null, null, outputFile);
                             }
                             else if (!string.IsNullOrEmpty(certificate) && string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(certificate) && !string.IsNullOrEmpty(clientId))
                             {
@@ -457,7 +493,7 @@ namespace SharpSCCM
                             }
                             else if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(registerClient))
                             {
-                                MgmtPointMessaging.GetSecretsFromPolicy(managementPoint, siteCode, null, null, username, password, registerClient, outputFile);
+                                MgmtPointMessaging.GetSecretsFromPolicies(managementPoint, siteCode, null, null, username, password, registerClient, outputFile);
                             }
                             else if (!string.IsNullOrEmpty(registerClient) && (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)))
                             {
@@ -465,12 +501,28 @@ namespace SharpSCCM
                             }
                             else if (Helpers.IsHighIntegrity())
                             {
-                                MgmtPointMessaging.GetSecretsFromPolicy(managementPoint, siteCode, certificate, clientId, username, password, registerClient, outputFile);
+                                MgmtPointMessaging.GetSecretsFromPolicies(managementPoint, siteCode, certificate, clientId, username, password, registerClient, outputFile);
                             }
                             else
                             {
                                 Console.WriteLine("[!] A client name to register (-r), computer account name (-u), and computer account password (-p) must be specified when the user is not a local administrator");
                             }
+                        }
+                    });
+
+                var getSiteInfo = new Command("site-info", "Get information about the site, including the site server name, from a domain controller via LDAP");
+                getCommand.Add(getSiteInfo);
+                getSiteInfo.Add(new Option<string>(new[] { "--domain", "-d" }, "The FQDN of the Active Directory domain to get information from (e.g., \"aperture.local\")"));
+                getSiteInfo.Handler = CommandHandler.Create(
+                    (string domain) =>
+                    {
+                        if (string.IsNullOrEmpty(domain))
+                        {
+                            Console.WriteLine("[!] Please specify a domain (-d) to retrieve information from");
+                        }
+                        else
+                        {
+                            LDAP.GetSiteServersFromAD(domain);
                         }
                     });
 
@@ -535,13 +587,86 @@ namespace SharpSCCM
                             MgmtUtil.GetClassInstances(wmiConnection, "SMS_R_User", null, count, properties, whereCondition, orderBy, dryRun, verbose, true, true);
                         }
                     });
-
+                 
                 // invoke
                 var invokeCommand = new Command("invoke", "A group of commands that execute actions on a management point");
                 invokeCommand.AddGlobalOption(new Option<string>(new[] { "--management-point", "-mp" }, "The IP address, FQDN, or NetBIOS name of the management point to connect to (default: the current management point of the client running SharpSCCM)"));
                 invokeCommand.AddGlobalOption(new Option<string>(new[] { "--site-code", "-sc" }, "The three character site code (e.g., \"PS1\") (default: the site code of the client running SharpSCCM)"));
                 rootCommand.Add(invokeCommand);
+                 
+                //invoke adminService
+                var invokeAdminService = new Command("admin-service", "Invoke an arbitrary CMPivot query against a collection of clients or a single client via AdminService\n" +
+                    "  Requirements:\n" +
+                    "    - Full Administrator\n" +
+                    "    - https://learn.microsoft.com/en-us/mem/configmgr/core/servers/manage/cmpivot#permissions\n" +
+                    "    Examples:\n" +
+                    "       - SharpSCCM_merged.exe invoke admin-service -q \"Device\" -r 16777211\n" +
+                    "       - SharpSCCM_merged.exe invoke admin-service -q \"OS | where (Version like '10%')\" -r 16777211\n" +
+                    "       - SharpSCCM_merged.exe invoke admin-service -q \"InstalledSoftware\" -r 16777211\n" +
+                    "       - SharpSCCM_merged.exe invoke admin-service -q \"EventLog('System') | order by DateTime desc\" -r 16777211\n" +
+                    "    Resources:\n" +
+                    "       - https://gist.github.com/merlinfrombelgium/008cca8576cf34814022c438b33a4562");
+                invokeCommand.Add(invokeAdminService);
+                invokeAdminService.AddOption(new Option<string>(new[] { "--query", "-q" }, "The query you want to execute against a collection of clients or single client (e.g., --query \"IPConfig\")") { Arity = ArgumentArity.ExactlyOne });
+                invokeAdminService.AddOption(new Option<string>(new[] { "--collection-id", "-i" }, "The collectionId to point the query to. (e.g., SMS00001 for all systems collection)") { Arity = ArgumentArity.ExactlyOne });
+                invokeAdminService.Add(new Option<string>(new[] { "--resource-id", "-r" }, "The unique ResourceID of the device to point the query to. Please see command \"get resourceId\" to retrieve the ResourceID for a user or device") { Arity = ArgumentArity.ExactlyOne });
+                invokeAdminService.Add(new Option<string>(new[] { "--delay", "-d" }, "Seconds between requests when checking for results from the API,(e.g., --delay 5) (default: requests are made every 5 seconds)"));
+                invokeAdminService.Add(new Option<string>(new[] { "--retries", "-re" }, "The total number of attempts to check for results from the API before a timeout is thrown.\n (e.g., --timeout 5) (default: 5 attempts will be made before a timeout"));
+                invokeAdminService.Add(new Option<bool>(new[] { "--json", "-j" }, "Get JSON output"));
+                invokeAdminService.Handler = CommandHandler.Create(
+                    async (string managementPoint, string siteCode, string query, string collectionId, string resourceId, string delay, string retries, bool json) =>
+                    {
 
+                        string[] delayTimeoutValues = new string[] { "5", "5" };
+
+                        
+
+                        if (delay != null)
+                        {
+                            if (delay.Length < 1 || !uint.TryParse(delay, out uint value) || value == 0)
+                            {
+                                Console.WriteLine("\r\n[!] Please check your syntax for the --delay parameter (e.g., --delay 5)\r\n[!] Leave blank for the default 5 seconds wait before each attempt to retrieve results");
+                                return;
+                            }
+                            else
+                            {
+                                delayTimeoutValues[0] = delay;
+                            }
+                        }
+                        if (retries != null)
+                        {
+                            if (retries.Length != 1 || !uint.TryParse(retries, out uint value) || retries == "0")
+                            {
+                                Console.WriteLine("\r\n[!] Please check your syntax for the --retries parameter (e.g., --retries 5)\r\n[!] Leave blank for a default of 5 retries before reaching a timeout");
+                                return;
+                            }
+                            else
+                            {
+                                delayTimeoutValues[1] = retries;
+                            }
+                        }
+                        if ((string.IsNullOrEmpty(query)) || (string.IsNullOrEmpty(collectionId) && string.IsNullOrEmpty(resourceId)))
+                        {
+                            Console.WriteLine("\r\n[!] Please specify a query (-q), and CollectionID (-i) or ResourceID (-r) to execute an AdminService query or add -h for help\r\n");
+                        }
+                        else if (!string.IsNullOrEmpty(collectionId) && !string.IsNullOrEmpty(resourceId))
+                        {
+                            Console.WriteLine("[!] Please specify either a CollectionID (-i) or a ResourceID (-r)");
+                        }
+
+                        //Adding default Management Point
+                        else
+                        { 
+                            if (managementPoint == null)
+                            {
+                                (managementPoint, _) = ClientWmi.GetCurrentManagementPointAndSiteCode();
+
+                            }
+                            
+                            await AdminService.Main(managementPoint, siteCode, query, collectionId, resourceId, delayTimeoutValues, json);
+                        }
+                    });
+                 
                 // invoke client-push
                 var invokeClientPush = new Command("client-push", "Force the primary site server to authenticate to an arbitrary destination via NTLM using each configured account and its domain computer account\n" +
                     "  Requirements:\n" +
